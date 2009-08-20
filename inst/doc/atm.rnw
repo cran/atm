@@ -1,0 +1,251 @@
+%\VignetteIndexEntry{Additive Term Models (atm 0.1.0)}
+\documentclass {article}
+\usepackage {Sweave} 
+
+\setlength {\topmargin} {-1.5cm} 
+\setlength {\topskip} {0cm}     
+\setlength {\textheight} {22.5cm} 
+\setlength {\textwidth} {16.25cm}     
+\setlength {\oddsidemargin} {-0.0cm} 
+\setlength {\evensidemargin} {-0.0cm} 
+\linespread {1.10}
+
+\DefineVerbatimEnvironment{Sinput}{Verbatim} {xleftmargin=2em}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{xleftmargin=2em}
+\DefineVerbatimEnvironment{Scode}{Verbatim}{xleftmargin=2em}
+\fvset{listparameters={\setlength{\topsep}{0pt}}}
+\renewenvironment{Schunk}{\vspace{\topsep}}{\vspace{\topsep}}
+
+\SweaveOpts{keep.source=TRUE}
+
+\begin{document}
+
+<<echo=false>>=
+options(continue=" ")
+options(SweaveHooks=list(fig=function()
+par(mar=c(5.1, 4.1, 1.1, 2.1))))
+require (oosp)
+require (atm)
+@
+
+\title {Additive Term Models (atm 0.1.0) \\ VERY ROUGH DRAFT}
+\author {Miss Charlotte Maia \\ \textit {Statistician (Portfolio Management and Statistical Programming)}}
+\maketitle
+\thispagestyle {empty}
+
+\begin {abstract}
+The atm package is an R package for creating additive models with semiparametric predictors. It emphasizes term objects, especially the implementation of a term class hierarchy, and the interpretation and evaluation of term estimates as functions of explanatories. Typically, linear and smooth terms would be treated somewhat differently, however by creating a term superclass, and then creating linear and smooth term subclasses, we are able to unify much of their properties. The linear class is further extended by categorical, linear and interaction term classes. In order to support interpretation, linear terms generally correspond to a single variable, and (especially in the case of categorical terms) may contain multiple parameters each. Likewise, smooth terms use series-based local polynomial smoothing. 
+\end {abstract}
+
+\subsubsection* {WARNING}
+This package is new. It should be regarded as very unstable, and has had very limited testing. It is not \textit {yet} recommended for use in an applied context.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%Section
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section {Introduction}
+
+An extremely common notion in statistics is the ``linear model''. Perhaps the most important part of the linear model is a linear predictor, which we will define as a function of one of more explanatories. One way to express a linear predictor is as the sum of linear terms, where roughly speaking, each term is the product of a parameter and a variable. Hence, we can also describe a linear model as an additive model, and a linear predictor as an additive predictor. Noting that for our purposes we still regard the model as additive, if it contains interactions.
+
+However, a linear model is only a special case of an additive model. Additive models also can include smooth and spline terms. The theory used to fit an additive model with linear, smooth or other classes of terms is relatively straightforward, however creating a full featured implementation, that is not overly restrictive, is not so straightforward.
+
+If we consider some of the existing frameworks for this purpose, they do indeed restrict us. Hence the primary goal of the atm package is to provide a framework for additive models with semiparametric predictors, that is relatively unrestrictive. This is achieved via an object oriented approach, especially a sophisticated term class hierarchy, that is discussed further in the next section. Rather than hybridise, we generalise.
+
+The second major goal of the package, is to treat term estimates as functions of explanatories. The author is interested in applications of additive models to optimisation (e.g. determining the path of steepest ascent) and forecasting. Whilst there are different views on optimisation and forecasting, she believes it is imperative to look at functions of variables, both at a mathematical level and at a visual level. This contrasts to typical implementations (especially for linear terms), where term estimates are essentially parameters. If we want to say, plot the effect of a categorical variable with ten levels (after adjusting for other variables), this would be a lot more work than it should be. Note that this makes sense. Usually in statistics, one is interested in parameters, and the inference for such parameters.
+
+In order to achieve this goal, the linear terms in this package, generally correspond to one variable, however (especially in the case of categorical terms) may contain multiple parameters. We can visualise the effect of the variable simply by typing plot (catterm), and evaluate a polynomial term simply by evaluate (polyterm, xvalue).
+
+In addition the goals mentioned above, the author is experimenting with methods to make the models extremely robust to missing values in the explanatories. Presently this has not been successful, and any data used by terms must be clean. Further experiments are being performed to generalise terms by specifying an estimator.
+
+There are a few issues with this package that are worth noting:
+\begin {enumerate}
+	\item The data must be clean. Incorrect output is produced otherwise. This problem should hopefully be fixed soon.
+	\item The algorithm may fail to converge. Either start with a regular linear model, or use manual forward selection.
+	\item Smooth terms have no inference.
+	\item Linear terms ignore weights in their inference.
+	\item The inference is unreliable altogether.
+	\item Some features haven't been tested at all.
+\end {enumerate}
+
+This isn't as bad as it sounds. Remember it is version 0.1.0.
+
+Note that the atm package is built on top of the oosp package. Also note the term class indirectly extends the environment class, hence term objects require some special consideration. This might be discussed further in the next release. Although here is issue to be aware of.
+
+Two compenv objects with same ``value''.
+<<>>==
+e1 = e2 = compenv (x=0)
+e1$x
+e2$x
+@
+
+If we change one, it changes both (actually they are the same thing).
+Both atm objects and term objects behave the same way.
+<<>>==
+e1$x = 1:10
+e1$x
+e2$x
+@
+
+%Here were distinguish explanatory variables into two types, firstly, real world variables (denoted $x$ or $u$), and secondly, model world variables (denoted $z$). In theory, real world variables are regarded as anything that is measurable, however me must limit ourselves by what we can reasonably use. Model world variables are transformed real world variables, that are designed to be compatible with standard(ish) statistical estimation methods. The distinguishtion is clearest for categorical variables. These can be regarded as real world variables, however need to be recoded as a binary matrix for least squares, which we regard as moded world variable. We can also furhter subdivide real world variables into clean variables and unclean (or messy) variables that allow invalid values. In theory we can make similiar distinguitions for the response, however additive term models strickly require a (completely clean) numeric vector. We also allow variables to be nested (however only once). So a variable can contain component variables, e.g. A coordinate variable might have two component variables. We describe functions that map real world variables to model world variables as key functions. The linear term requires the body of key functions to be specified, however linear subclasses simplify this process.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%Section
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section {Term Class Hierarchy}
+
+The term class extends the termenv class, which in turn extends the compenv class from the oosp package. These objects are environments.
+
+In principle the term class is abstract, meaning that one can't create an instance of it. However, due to the liberal nature of S3, we still can if we want, however the user should not attempt this.
+
+The subclasses have already been discussed. Following is a somewhat rushed diagram.
+
+\begin {center}
+	\includegraphics [totalheight=10cm]{uml.pdf}
+\end {center}
+
+It should be noted that terms also have components, such as term design, term estimator and term estimate components. It is possible to change the estimators, however this is currently a bit rough it will be discussed further if and when the process is refined.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%Section
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section {Linear Additive Models}
+
+Firstly, it is important to re-iterate, that linear terms in this package, can contain multiple parameters. Also, just so that there is no misunderstanding ``linear'' essentially refers to linearity in parameters, where as ``polynomial'' which we also consider to be linear, is a polynomial in a variable.
+
+Categorical, polynomial and interaction terms, add little to linear terms in the way of functionality. They are mainly there to make it easier to create a linear term. Historically one would work out a design matrix. With R's lm function, obviously you don't do this, rather you provide a formula object. From personal experience, formula objects are good for simple models created at the command line. However for more exotic models, or models created inside another algorithm, they can become awkward. Hence the approach here is different, a linear term contains what we call key functions (noting the author is not aware of any standard word). We define a key function to be a function that maps what we call a real world variable, to a model world variable. So a polynomial $\hat \theta _1 x + \hat \theta_2 x ^2$, can be thought of as an expression with one real world variable, two model world variables, and two key functions $x$ and $x^2$. We must specify key functions, if we wish to create non-standard linear terms. However for standard linear terms, we just use one of the linear subclasses, e.g. the categorical term constructor creates the key functions for us.
+
+Also note that categorical terms contain one parameter for each variable level (i.e. there is a baseline estimate), and that non-standard linear terms, such as $\log (x)$, are only permitted if the function of $x$, produces a valid value, for every valid realised value of x. So if an explanatory $x$, contains zeros, then we can not use $\log (x)$. The default key function for a pure linear term and for a polynomial term is $x$. Although see the following note on polynomials.
+
+Now let us consider an example. Here we have a simulated dataset.
+<<>>=
+data (sample)
+sample [1:4,]
+attach (sample)
+@
+
+We can create a term object in two ways. If we wish to fit an atm model, then we omit y. However if we wish to fit a single term in isolation, we include y. The term will automatically fit itself if y is provided. In the case of a polynomial term, the presence or absence of y, determines whether or not an intercept parameter is included by default.
+
+So these are the roughly the same and do not fit themselves (plus there no intercept).
+<<eval=false>>==
+t = linear (x1)
+t = poly (x1)
+@
+
+These are also roughly the same, however do fit themselves (plus there is also no intercept).
+<<eval=false>>==
+t = linear (x1, y)
+t = linear (x1)
+fit (t, y)
+@
+
+These are not the same (the polynomial will include an intercept, unless the argument intercept=FALSE is included).
+<<eval=false>>==
+t = linear (x1, y)
+t = poly (x1, y)
+@
+
+Fitting a single linear term is not all that interesting. Let us now consider an atm model. All of the variables are continuous, except for x3. If we make an assumption that all variables effect the response (unwise in practice), then perhaps the simplest reasonable model is the following: 
+<<>>==
+t1 = linear (x1)
+t2 = linear (x2)
+t3 = categorical (x3)
+t4 = linear (x4)
+m = atm (y, t1, t2, t3, t4)
+@
+
+\begin {center}
+<<fig=true,width=6,height=4>>=...
+plot (m)
+@
+\end {center}
+
+There is a possible polynomial effect that has not been captured so we might try something like this.
+
+<<>>=
+t2 = polynomial (x2, deg=2)
+m = atm (y, t1, t2, t3, t4)
+@
+
+\begin {center}
+<<fig=true,width=6,height=4>>=...
+plot (m)
+@
+\end {center}
+
+Repeating for the other term.
+<<>>=
+t4 = polynomial (x4, deg=2)
+m = atm (y, t1, t2, t3, t4)
+@
+
+\begin {center}
+<<fig=true,width=6,height=4>>=...
+plot (m)
+@
+\end {center}
+
+Obviously that isn't completely successful. We might try a third or fourth degree polynomial, if we wanted to be adventurous. However we will consider a smooth term in the next section.
+
+We can evaluate terms using the evaluate function.
+<<>>=
+evaluate (t3, "D")
+@
+
+To evaluate the entire atm model, we use a list of equal length vectors. Interactions are slightly different. However they are still being tested and are not discussed here.
+<<>>=
+evaluate (m, list (0, 0, "D", 0) )
+@
+
+We can print or produce summary output for both the atm model and term objects, in the same way as lm objects, except that for terms, summary output requires us to provide a y argument (either the response, or partial residuals). It may be easier to use the atm version and specify a which argument instead.
+
+Also re-iterating, at present, the inference is unreliable altogether. This should be improved in future releases.
+<<>>=
+summary (m, 3)
+@
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%Section
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section {Smooth Terms}
+
+As promised, here is a smooth term, although not that great.
+<<>>=
+t4 = smooth (x4)
+m = atm (y, t1, t2, t3, t4)
+@
+
+\begin {center}
+<<fig=true,width=6,height=4>>=...
+plot (m, which=4)
+@
+\end {center}
+
+We can try again with some different arguments. Note that the author is developing better smoothing methods, plus is considering adding a spline term (based on piecewise functions with fixed knots) to the package.
+<<>>=
+t4 = smooth (x4, deg=4, refit=2)
+m = atm (y, t1, t2, t3, t4)
+@
+
+\begin {center}
+<<fig=true,width=6,height=4>>=...
+plot (m, which=4)
+@
+\end {center}
+
+Whilst we can use the evaluate function. We can also view the model as a series.
+<<>>=
+t4$d$sx
+t4$e$sy
+@
+
+Whilst the series is fitted using a local polynomial smoother. Evaluation is done via a spline. The actual implementation is given.
+<<>>=
+evaluate.smooth
+@
+
+
+\end{document}
+
+
